@@ -45,3 +45,21 @@ variable "db_password" {
   type        = string
   sensitive   = true
 }
+
+variable "openai_api_key" {
+  description = "OpenAI API key for Open WebUI"
+  type        = string
+  sensitive   = true
+}
+
+variable "openwebui_subdomain" {
+  description = "Subdomain for Open WebUI, e.g. chat -> chat.example.com"
+  type        = string
+  default     = "chat"
+}
+
+variable "openwebui_instance_type" {
+  description = "EC2 instance type for Open WebUI"
+  type        = string
+  default     = "t3.small"
+}

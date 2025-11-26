@@ -21,7 +21,8 @@ locals {
     ManagedBy   = "terraform"
   }
 
-  fqdn = "${var.subdomain}.${var.root_domain}"
+  fqdn                = "${var.subdomain}.${var.root_domain}"
+  openwebui_fqdn      = "${var.openwebui_subdomain}.${var.root_domain}"
 }
 
 # ---------------------------
@@ -203,4 +204,86 @@ resource "aws_route53_record" "n8n" {
   type    = "A"
   ttl     = 60
   records = [aws_eip.n8n.public_ip]
+}
+
+# ---------------------------
+# Open WebUI Security Group
+# ---------------------------
+resource "aws_security_group" "openwebui" {
+  name        = "${local.name_prefix}-openwebui-sg"
+  description = "Allow HTTP/HTTPS for Open WebUI; access via SSM"
+  vpc_id      = aws_vpc.main.id
+
+  # HTTP for Let's Encrypt + redirect
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # HTTPS for production
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Egress all
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-openwebui-sg" })
+}
+
+# ---------------------------
+# Open WebUI EC2 instance
+# ---------------------------
+resource "aws_instance" "openwebui" {
+  ami                    = data.aws_ami.ubuntu_22.id
+  instance_type          = var.openwebui_instance_type
+  subnet_id              = aws_subnet.public.id
+  vpc_security_group_ids = [aws_security_group.openwebui.id]
+  key_name               = var.key_name
+
+  iam_instance_profile = aws_iam_instance_profile.ssm_profile.name
+
+  root_block_device {
+    volume_size = 40
+    volume_type = "gp3"
+  }
+
+  user_data = templatefile("${path.module}/../cloud-init/openwebui_user_data.tpl", {
+    domain         = local.openwebui_fqdn
+    email          = var.letsencrypt_email
+    openai_api_key = var.openai_api_key
+  })
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-openwebui-ec2" })
+}
+
+# ---------------------------
+# Open WebUI Elastic IP
+# ---------------------------
+resource "aws_eip" "openwebui" {
+  domain   = "vpc"
+  instance = aws_instance.openwebui.id
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-openwebui-eip" })
+}
+
+# ---------------------------
+# Route 53 A-record: chat.<domain> -> Open WebUI EIP
+# ---------------------------
+resource "aws_route53_record" "openwebui" {
+  zone_id = data.aws_route53_zone.root.zone_id
+  name    = local.openwebui_fqdn
+  type    = "A"
+  ttl     = 60
+  records = [aws_eip.openwebui.public_ip]
 }
